@@ -1,0 +1,19 @@
+# Required to run the studio: planning, estimation, detection, API.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+sqlalchemy>=2.0
+psutil>=5.9          # CPU and RAM readings; without it those show as N/A
+
+# Optional. Each one unlocks capability rather than being needed to start.
+# The studio reports honestly on what is missing instead of failing.
+#
+#   torch>=2.2           accelerator detection, precision probing, training
+#   transformers>=4.40   model configs, tokenizers, real token counts
+#   peft>=0.10           the adapter methods themselves
+#   accelerate>=0.29     multi-device and offload
+#   bitsandbytes>=0.43   4-bit/8-bit quantization (QLoRA) and 8-bit optimizers
+#   trl>=0.8             supervised and preference trainers
+#   datasets>=2.18       Hugging Face dataset loading
+#   pyarrow>=15          Parquet datasets
+#   flash-attn           memory-efficient attention

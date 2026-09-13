@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universal LoRA Studio</title>
+<style>
+/* ---------------------------------------------------------------------------
+   The design is built around one idea: you can always see where a number came
+   from. Provenance is not a footnote here, it is the visual system. Four
+   states, four distinct treatments, legible at a glance and without colour
+   alone carrying the meaning.
+   --------------------------------------------------------------------------- */
+:root{
+  --ground:#edf0ef; --panel:#fcfdfd; --panel-sunk:#f4f6f6;
+  --ink:#14242b; --ink-soft:#4d6068; --rule:#d7dedd;
+  --detected:#12695a; --configured:#6b4b9a; --estimated:#2f5d8c;
+  --unavailable:#8a9499; --alert:#a33b2a; --warn:#8a6410;
+  --radius:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ground); color:var(--ink);
+  font:400 15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-0.012em}
+h1{font-size:1.5rem}
+h2{font-size:1.1rem}
+h3{font-size:0.95rem;font-weight:600}
+p{margin:0 0 .7rem}
+a{color:var(--estimated)}
+button{font:inherit}
+
+/* layout ------------------------------------------------------------------ */
+.shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
+nav{
+  background:var(--panel);border-right:1px solid var(--rule);
+  padding:1.4rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{padding:0 1.2rem 1.2rem;border-bottom:1px solid var(--rule);margin-bottom:.8rem}
+.brand strong{display:block;font-size:.98rem;font-weight:650;line-height:1.25}
+.brand span{font-size:.78rem;color:var(--ink-soft)}
+nav button{
+  display:block;width:100%;text-align:left;padding:.5rem 1.2rem;
+  background:none;border:0;border-left:3px solid transparent;
+  color:var(--ink-soft);cursor:pointer;font-size:.9rem;
+}
+nav button:hover{color:var(--ink);background:var(--panel-sunk)}
+nav button[aria-current="page"]{
+  color:var(--ink);font-weight:600;border-left-color:var(--detected);
+  background:var(--panel-sunk);
+}
+nav button:focus-visible{outline:2px solid var(--estimated);outline-offset:-2px}
+main{padding:2rem 2.4rem 4rem;max-width:1100px}
+.page{display:none}
+.page.on{display:block}
+header.page-head{margin-bottom:1.6rem}
+header.page-head p{color:var(--ink-soft);max-width:62ch;margin-top:.35rem}
+
+/* panels ------------------------------------------------------------------ */
+.panel{
+  background:var(--panel);border:1px solid var(--rule);
+  border-radius:var(--radius);padding:1.2rem 1.3rem;margin-bottom:1.1rem;
+}
+.panel > h2{margin-bottom:.2rem}
+.panel-note{color:var(--ink-soft);font-size:.86rem;margin-bottom:1rem}
+.row{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.1rem}
+
+/* readings: the core component -------------------------------------------- */
+.readings{display:grid;grid-template-columns:minmax(140px,auto) 1fr;gap:.1rem 1.2rem}
+.readings dt{
+  color:var(--ink-soft);font-size:.86rem;padding:.32rem 0;
+  border-top:1px solid var(--rule);
+}
+.readings dd{
+  margin:0;padding:.32rem 0;border-top:1px solid var(--rule);
+  display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;
+}
+.readings dt:first-of-type,.readings dd:first-of-type{border-top:0}
+.reading-value{font-weight:500}
+.reading-value.absent{color:var(--unavailable);font-weight:400;font-style:italic}
+
+/* the provenance marker: shape and colour, never colour alone */
+.mark{
+  font-size:.68rem;font-weight:600;letter-spacing:.01em;
+  padding:.06rem .38rem;border-radius:2px;white-space:nowrap;
+  border:1px solid currentColor;line-height:1.5;
+}
+.mark.detected{color:var(--detected);background:#12695a0f}
+.mark.measured{color:var(--detected);background:#12695a0f}
+.mark.configured{color:var(--configured);background:#6b4b9a0f;border-style:dashed}
+.mark.estimated{color:var(--estimated);background:#2f5d8c0f;border-style:dotted}
+.mark.unavailable{color:var(--unavailable);background:transparent;border-style:dotted}
+.reading-note{font-size:.78rem;color:var(--ink-soft);flex-basis:100%}
+
+/* banner that states what kind of thing you are looking at ----------------- */
+.origin-banner{
+  display:flex;align-items:center;gap:.7rem;padding:.6rem .9rem;
+  border-radius:var(--radius);margin-bottom:1rem;font-size:.88rem;
+  border:1px solid;
+}
+.origin-banner.detected{border-color:var(--detected);background:#12695a0d;color:var(--detected)}
+.origin-banner.configured{border-color:var(--configured);background:#6b4b9a0d;color:var(--configured)}
+
+/* forms ------------------------------------------------------------------- */
+label{display:block;font-size:.82rem;color:var(--ink-soft);margin-bottom:.25rem}
+input,select{
+  font:inherit;font-variant-numeric:tabular-nums;padding:.42rem .55rem;
+  border:1px solid var(--rule);border-radius:var(--radius);background:var(--panel);
+  color:var(--ink);width:100%;
+}
+input:focus,select:focus{outline:2px solid var(--estimated);outline-offset:-1px;border-color:var(--estimated)}
+.field{flex:1 1 150px;min-width:0}
+.btn{
+  padding:.48rem 1rem;border:1px solid var(--ink);background:var(--ink);color:var(--panel);
+  border-radius:var(--radius);cursor:pointer;font-weight:500;font-size:.9rem;
+}
+.btn:hover{background:#0b181d}
+.btn.quiet{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.quiet:hover{background:var(--panel-sunk)}
+.btn:focus-visible{outline:2px solid var(--estimated);outline-offset:2px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+
+/* the one bold element: the memory breakdown ------------------------------ */
+.meter{margin:.9rem 0 .4rem}
+.meter-bar{
+  display:flex;height:34px;border-radius:var(--radius);overflow:hidden;
+  background:repeating-linear-gradient(135deg,#e4e9e8,#e4e9e8 6px,#eef1f0 6px,#eef1f0 12px);
+  border:1px solid var(--rule);
+}
+.meter-seg{position:relative;min-width:2px}
+.meter-seg:hover{filter:brightness(1.12)}
+.meter-scale{
+  display:flex;justify-content:space-between;font-size:.76rem;
+  color:var(--ink-soft);margin-top:.3rem;
+}
+.meter-legend{display:flex;flex-wrap:wrap;gap:.15rem 1.1rem;margin-top:.7rem;font-size:.82rem}
+.meter-legend span{display:flex;align-items:center;gap:.4rem}
+.swatch{width:10px;height:10px;border-radius:2px;flex:none}
+.ceiling{
+  position:relative;height:0;
+}
+.ceiling i{
+  position:absolute;top:-36px;bottom:0;width:2px;background:var(--alert);
+}
+.ceiling em{
+  position:absolute;top:-56px;font-style:normal;font-size:.74rem;color:var(--alert);
+  transform:translateX(-50%);white-space:nowrap;font-weight:600;
+}
+
+/* verdicts ---------------------------------------------------------------- */
+.verdict{border-left:3px solid;padding:.6rem 0 .6rem .9rem;margin:.9rem 0}
+.verdict strong{display:block;font-size:1.02rem}
+.verdict p{margin:.2rem 0 0;font-size:.88rem;color:var(--ink-soft)}
+.verdict.fits{border-color:var(--detected)}
+.verdict.tight{border-color:var(--warn)}
+.verdict.unlikely,.verdict.infeasible{border-color:var(--alert)}
+.verdict.unknown{border-color:var(--unavailable)}
+
+/* decision trail ---------------------------------------------------------- */
+.trail{list-style:none;margin:0;padding:0}
+.trail li{padding:.6rem 0;border-top:1px solid var(--rule);display:grid;
+  grid-template-columns:minmax(150px,auto) 1fr;gap:.2rem 1rem}
+.trail li:first-child{border-top:0}
+.trail .what{font-weight:500;font-size:.9rem}
+.trail .what code{
+  background:var(--panel-sunk);padding:.05rem .3rem;border-radius:2px;font-size:.85em;
+}
+.trail .why{font-size:.87rem;color:var(--ink-soft)}
+.authority{
+  font-size:.68rem;font-weight:600;padding:.05rem .35rem;border-radius:2px;
+  border:1px solid currentColor;margin-left:.4rem;
+}
+.authority.user{color:var(--configured)}
+.authority.budget{color:var(--warn)}
+.authority.hardware{color:var(--detected)}
+.authority.model,.authority.dataset{color:var(--estimated)}
+.authority.recommendation{color:var(--ink-soft)}
+
+/* misc -------------------------------------------------------------------- */
+.notes{margin:.8rem 0 0;padding:0;list-style:none;font-size:.87rem}
+.notes li{padding:.35rem 0 .35rem .9rem;border-left:2px solid var(--rule);color:var(--ink-soft);margin-bottom:.2rem}
+.notes.warnings li{border-left-color:var(--warn)}
+.notes.blockers li{border-left-color:var(--alert);color:var(--ink)}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;font-weight:600;color:var(--ink-soft);padding:.4rem .6rem .4rem 0;border-bottom:1px solid var(--rule);font-size:.82rem}
+td{padding:.5rem .6rem .5rem 0;border-bottom:1px solid var(--rule);vertical-align:top}
+.device-list{display:grid;gap:.8rem}
+.device{border:1px solid var(--rule);border-radius:var(--radius);padding:.8rem 1rem;background:var(--panel-sunk)}
+.device h3{margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:baseline;gap:.6rem}
+.device h3 small{font-weight:400;color:var(--ink-soft);font-size:.78rem}
+.method{padding:.55rem 0;border-top:1px solid var(--rule);display:grid;grid-template-columns:auto 1fr;gap:.1rem .7rem}
+.method:first-child{border-top:0}
+.method .name{font-weight:500;font-size:.9rem}
+.method.off .name{color:var(--unavailable)}
+.method .why{grid-column:2;font-size:.83rem;color:var(--ink-soft)}
+.status-dot{width:8px;height:8px;border-radius:50%;margin-top:.45rem}
+.status-dot.on{background:var(--detected)}
+.status-dot.off{background:var(--unavailable)}
+.empty{color:var(--ink-soft);font-size:.9rem;padding:1rem 0}
+.loading{color:var(--ink-soft);font-size:.9rem}
+.toolbar{display:flex;gap:.6rem;margin:1rem 0 0;flex-wrap:wrap}
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  nav{position:static;height:auto;display:flex;flex-wrap:wrap;padding:.6rem}
+  nav button{width:auto;border-left:0;border-bottom:3px solid transparent}
+  nav button[aria-current="page"]{border-left:0;border-bottom-color:var(--detected)}
+  .brand{width:100%;border-bottom:0;padding-bottom:.6rem;margin-bottom:0}
+  main{padding:1.2rem}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+<nav>
+  <div class="brand">
+    <strong>Universal LoRA Studio</strong>
+    <span id="brand-env">reading this machine…</span>
+  </div>
+  <button data-page="hardware" aria-current="page">Hardware</button>
+  <button data-page="planner">Planner</button>
+  <button data-page="simulator">Simulator</button>
+  <button data-page="datasets">Datasets</button>
+  <button data-page="methods">Methods</button>
+  <button data-page="environment">Environment</button>
+</nav>
+
+<main>
+<!-- ================= HARDWARE ================= -->
+<section class="page on" id="page-hardware">
+  <header class="page-head">
+    <h1>Hardware</h1>
+    <p>What this machine reports, what you have told the studio, and what it
+       could not find out. The three are never mixed.</p>
+  </header>
+  <div id="hardware-body"><p class="loading">Reading this machine…</p></div>
+  <div class="toolbar">
+    <button class="btn" id="refresh-hw">Refresh detection</button>
+    <button class="btn quiet" id="goto-sim">Describe different hardware</button>
+  </div>
+</section>
+
+<!-- ================= PLANNER ================= -->
+<section class="page" id="page-planner">
+  <header class="page-head">
+    <h1>Plan a run</h1>
+    <p>Describe the model and what you are optimising for. Every value in the
+       result can be overridden, and anything you set is left alone.</p>
+  </header>
+
+  <div class="panel">
+    <h2>Model</h2>
+    <p class="panel-note">Point at a config on disk for exact figures, or give a
+       size to plan against a model you do not have yet.</p>
+    <div class="row">
+      <div class="field" style="flex:2 1 260px">
+        <label for="m-path">Path to a model directory or config.json</label>
+        <input id="m-path" placeholder="/models/llama-3-8b" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="m-size">…or a size</label>
+        <input id="m-size" placeholder="8B" value="8B" autocomplete="off">
+      </div>
+    </div>
+    <div class="row" style="margin-top:.9rem">
+      <div class="field">
+        <label for="p-goal">Optimise for</label>
+        <select id="p-goal"></select>
+      </div>
+      <div class="field">
+        <label for="p-profile">Plan against</label>
+        <select id="p-profile"><option value="current">Current environment</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Limits you set</h2>
+    <p class="panel-note">Separate from what the hardware can do. Useful on a
+       shared machine, or when you want the run finished by a certain time.</p>
+    <div class="row">
+      <div class="field"><label for="b-vram">Device memory ceiling (GB)</label><input id="b-vram" type="number" min="1" step="1" placeholder="no limit"></div>
+      <div class="field"><label for="b-ram">System RAM ceiling (GB)</label><input id="b-ram" type="number" min="1" step="1" placeholder="no limit"></div>
+      <div class="field"><label for="b-disk">Disk ceiling (GB)</label><input id="b-disk" type="number" min="1" step="1" placeholder="no limit"></div>
+      <div class="field"><label for="b-hours">Time ceiling (hours)</label><input id="b-hours" type="number" min="0.5" step="0.5" placeholder="no limit"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Your data</h2>
+    <p class="panel-note">Optional. Sample count and length shift sequence
+       length and epoch count more than anything else here.</p>
+    <div class="row">
+      <div class="field"><label for="d-count">Samples</label><input id="d-count" type="number" min="1" placeholder="unknown"></div>
+      <div class="field"><label for="d-p95">95th percentile length (tokens)</label><input id="d-p95" type="number" min="1" placeholder="unknown"></div>
+      <div class="field"><label for="d-max">Longest sample (tokens)</label><input id="d-max" type="number" min="1" placeholder="unknown"></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="run-plan">Build the plan</button>
+      <button class="btn quiet" id="clear-locks" hidden>Release my overrides</button>
+    </div>
+  </div>
+
+  <div id="plan-body"></div>
+</section>
+
+<!-- ================= SIMULATOR ================= -->
+<section class="page" id="page-simulator">
+  <header class="page-head">
+    <h1>Describe other hardware</h1>
+    <p>Answer “could I train this on a 12 GB card” without owning one. Nothing
+       here is measured, and every figure it produces says so.</p>
+  </header>
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label for="s-name">Call it</label><input id="s-name" value="12 GB workstation"></div>
+      <div class="field"><label for="s-backend">Backend</label>
+        <select id="s-backend">
+          <option value="cuda">CUDA</option><option value="rocm">ROCm</option>
+          <option value="metal">Metal</option><option value="cpu">CPU only</option>
+        </select></div>
+      <div class="field"><label for="s-vram">Memory per device (GB)</label><input id="s-vram" type="number" value="12" min="1"></div>
+      <div class="field"><label for="s-count">Devices</label><input id="s-count" type="number" value="1" min="1" max="16"></div>
+    </div>
+    <div class="row" style="margin-top:.9rem">
+      <div class="field"><label for="s-ram">System RAM (GB)</label><input id="s-ram" type="number" value="32" min="1"></div>
+      <div class="field"><label for="s-cores">CPU cores</label><input id="s-cores" type="number" value="16" min="1"></div>
+      <div class="field"><label for="s-quant">4-bit available</label>
+        <select id="s-quant"><option value="yes">Yes</option><option value="no">No</option></select></div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="save-profile">Save as a profile</button>
+      <button class="btn quiet" id="compare-all">Compare every profile</button>
+    </div>
+  </div>
+  <div id="sim-body"></div>
+</section>
+
+<!-- ================= DATASETS ================= -->
+<section class="page" id="page-datasets">
+  <header class="page-head">
+    <h1>Datasets</h1>
+    <p>Reads JSON, JSONL, CSV, TSV, text, Markdown and Parquet. Token lengths
+       are measured with the model's tokenizer when one is available and
+       estimated from characters when it is not.</p>
+  </header>
+  <div class="panel">
+    <div class="row">
+      <div class="field" style="flex:3 1 320px">
+        <label for="ds-path">Path to a dataset file</label>
+        <input id="ds-path" placeholder="/data/train.jsonl" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="ds-tok">Tokenizer (optional)</label>
+        <input id="ds-tok" placeholder="meta-llama/Llama-3-8B" autocomplete="off">
+      </div>
+      <div style="flex:0"><button class="btn" id="run-ds">Analyse</button></div>
+    </div>
+  </div>
+  <div id="ds-body"></div>
+</section>
+
+<!-- ================= METHODS ================= -->
+<section class="page" id="page-methods">
+  <header class="page-head">
+    <h1>Adapter methods</h1>
+    <p>Which methods work for this model on this machine, and for the ones that
+       do not, why not.</p>
+  </header>
+  <div id="methods-body"><p class="empty">Build a plan first — availability depends on both the model and the environment.</p></div>
+</section>
+
+<!-- ================= ENVIRONMENT ================= -->
+<section class="page" id="page-environment">
+  <header class="page-head">
+    <h1>Environment</h1>
+    <p>The snapshot recorded with every experiment. Two machines running
+       different library versions produce different results, so an experiment
+       without this is not reproducible.</p>
+  </header>
+  <div id="env-body"><p class="loading">Reading…</p></div>
+</section>
+</main>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------------
+   The frontend holds no opinions about hardware. It renders what the API
+   reports, including the gaps, and never substitutes a default for a missing
+   reading.
+   --------------------------------------------------------------------------- */
+const API = '';
+const $ = s => document.querySelector(s);
+const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!=null)n.textContent=text; return n; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, options){
+  const res = await fetch(API + path, {
+    headers:{'Content-Type':'application/json'},
+    ...options,
+    body: options?.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json().catch(()=>({detail:'The server returned something that was not JSON.'}));
+  if(!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  return data;
+}
+
+/* A reading is a value plus where it came from. Rendering them apart would
+   defeat the point, so there is exactly one function that draws one. */
+function reading(v){
+  if(!v) return `<span class="reading-value absent">Not available</span>`;
+  const origin = v.origin || 'unavailable';
+  const absent = origin === 'unavailable';
+  const value = absent ? 'Not available' : esc(v.display);
+  const interval = v.interval ? ` <span class="reading-note">plausible range ${v.interval[0]}–${v.interval[1]} ${esc(v.unit||'')}</span>` : '';
+  const note = v.note ? `<span class="reading-note">${esc(v.note)}</span>` : '';
+  return `<span class="reading-value${absent?' absent':''}">${value}</span>`
+       + `<span class="mark ${origin}">${esc(v.label || 'Not available')}</span>${note}${interval}`;
+}
+function readings(pairs){
+  const rows = pairs.map(([k,v]) => `<dt>${esc(k)}</dt><dd>${reading(v)}</dd>`).join('');
+  return `<dl class="readings">${rows}</dl>`;
+}
+function noteList(items, cls){
+  if(!items || !items.length) return '';
+  return `<ul class="notes ${cls||''}">${items.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`;
+}
+
+/* ---- navigation ---------------------------------------------------------- */
+document.querySelectorAll('nav button[data-page]').forEach(b=>{
+  b.onclick = () => showPage(b.dataset.page);
+});
+function showPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on', p.id==='page-'+name));
+  document.querySelectorAll('nav button[data-page]').forEach(b=>{
+    if(b.dataset.page===name) b.setAttribute('aria-current','page');
+    else b.removeAttribute('aria-current');
+  });
+  if(name==='environment') loadEnvironment();
+  window.scrollTo(0,0);
+}
+$('#goto-sim').onclick = () => showPage('simulator');
+
+/* ---- hardware ------------------------------------------------------------ */
+let CURRENT = null;
+
+function renderCapability(cap, software){
+  const bannerClass = cap.origin === 'detected' ? 'detected' : 'configured';
+  const bannerText = cap.origin === 'detected'
+    ? 'Read from this machine.'
+    : 'Described by you. These values were not measured, and plans built on them are predictions about a machine the studio has not seen.';
+
+  let html = `<div class="panel">
+    <h2>${esc(cap.profile_name)}</h2>
+    <div class="origin-banner ${bannerClass}">
+      <span class="mark ${cap.origin}">${esc(cap.label)}</span><span>${esc(bannerText)}</span>
+    </div>
+    ${readings([
+      ['Compute backend', {display:cap.backend, origin:cap.origin, label:cap.label}],
+      ['Accelerators', {display:String(cap.device_count), origin:cap.origin, label:cap.label}],
+      ['Memory for training', cap.training_memory_gb],
+      ['System RAM', cap.system_ram_gb],
+      ['RAM free now', cap.free_ram_gb],
+      ['CPU', cap.cpu_name],
+      ['CPU cores', cap.cpu_cores],
+      ['Disk free', cap.disk_free_gb],
+    ])}
+    <div class="row" style="margin-top:1rem;gap:2rem">
+      <div><h3>Numeric formats</h3><p style="margin:.3rem 0 0;font-size:.9rem">${cap.precisions.join(', ') || '—'}</p></div>
+      <div><h3>Quantization</h3><p style="margin:.3rem 0 0;font-size:.9rem">${cap.quantization.join(', ') || 'none available'}</p></div>
+      <div><h3>Memory-efficient attention</h3><p style="margin:.3rem 0 0;font-size:.9rem">${cap.supports_flash_attention ? 'available' : 'not installed'}</p></div>
+    </div>
+    ${noteList(cap.notes)}
+  </div>`;
+
+  if(cap.devices && cap.devices.length){
+    html += `<div class="panel"><h2>Devices</h2>
+      <p class="panel-note">Each device reports independently. A driver that
+         gives memory but refuses temperature produces exactly that.</p>
+      <div class="device-list">` +
+      cap.devices.map(d => `<div class="device">
+        <h3><span>${d.index}: ${esc(d.name?.display ?? 'Unnamed device')}</span>
+            <small>${esc(d.backend)}</small></h3>
+        ${readings([
+          ['Vendor', d.vendor],
+          ['Total memory', d.total_memory_gb],
+          ['Free memory', d.free_memory_gb],
+          ['Utilization', d.utilization_pct],
+          ['Temperature', d.temperature_c],
+          ['Power draw', d.power_w],
+          ['Compute capability', d.compute_capability],
+        ])}
+      </div>`).join('') + `</div></div>`;
+  }
+
+  if(software){
+    const items = Object.entries(software.items || {});
+    html += `<div class="panel"><h2>Software</h2>
+      <p class="panel-note">${Math.round((software.completeness||0)*100)}% of these could be read.</p>
+      ${readings(items.map(([k,v])=>[k.replace(/_/g,' '), v]))}</div>`;
+  }
+  return html;
+}
+
+async function loadHardware(refresh){
+  const body = $('#hardware-body');
+  body.innerHTML = '<p class="loading">Reading this machine…</p>';
+  try{
+    const d = await api(refresh ? '/api/hardware/refresh' : '/api/hardware/current',
+                        refresh ? {method:'POST'} : undefined);
+    CURRENT = d.capability;
+    body.innerHTML = renderCapability(d.capability, d.software);
+    const cap = d.capability;
+    $('#brand-env').textContent = cap.has_accelerator
+      ? `${cap.device_count} × ${cap.backend} · ${cap.training_memory_gb.display}`
+      : `${cap.backend} only · ${cap.training_memory_gb.display} RAM`;
+    body.insertAdjacentHTML('beforeend',
+      `<div class="panel"><h2>How this was worked out</h2>
+       <p class="panel-note">Providers are tried in order; the first that reports
+          usable hardware wins. The CPU provider always reports available, so
+          there is no machine this studio refuses to run on.</p>
+       <table><tr><th>Provider</th><th>Available</th></tr>` +
+       d.considered.map(c=>`<tr><td>${esc(c.provider)}</td><td>${c.available?'yes':'no'}${c.reason?' — '+esc(c.reason):''}</td></tr>`).join('') +
+       `</table><p style="margin-top:.8rem;font-size:.85rem;color:var(--ink-soft)">Selected: ${esc(d.provider)}</p></div>`);
+  }catch(e){
+    body.innerHTML = `<div class="panel"><h2>Could not reach the backend</h2>
+      <p class="panel-note">${esc(e.message)}</p>
+      <p style="font-size:.9rem">Start it with <code>uvicorn uls.api.app:app --reload</code> from the backend directory.</p></div>`;
+  }
+}
+$('#refresh-hw').onclick = () => loadHardware(true);
+
+/* ---- planner ------------------------------------------------------------- */
+const COMPONENT_COLOURS = {
+  'Base weights':'#12695a','Activations':'#2f5d8c','Output logits':'#6b4b9a',
+  'Optimizer state':'#a3742a','Gradients':'#8a6410','Adapter weights':'#3f8f7e',
+  'Attention scores':'#a33b2a','Runtime overhead':'#8a9499',
+};
+const LOCKS = {};
+
+function modelRef(){
+  const path = $('#m-path').value.trim();
+  return path ? {path} : {size: $('#m-size').value.trim() || '7B'};
+}
+function budgetPayload(){
+  const num = id => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+  return {
+    max_device_memory_gb: num('#b-vram'), max_system_ram_gb: num('#b-ram'),
+    max_disk_gb: num('#b-disk'), max_training_hours: num('#b-hours'),
+  };
+}
+function datasetPayload(){
+  const num = id => { const v = parseInt($(id).value,10); return isNaN(v) ? null : v; };
+  const p = {sample_count:num('#d-count'), p95_tokens:num('#d-p95'), max_tokens:num('#d-max')};
+  return Object.values(p).some(v=>v!==null) ? p : null;
+}
+
+function meter(breakdown, ceiling){
+  const comps = Object.entries(breakdown.components_gb);
+  const total = breakdown.total_gb;
+  const limit = ceiling?.value ?? null;
+  // Scale to the ceiling when there is one, so the bar shows headroom rather
+  // than always filling the width and looking full.
+  const span = limit ? Math.max(limit, total) * 1.02 : total;
+  const segs = comps.map(([name,gb]) =>
+    `<div class="meter-seg" style="width:${(gb/span*100).toFixed(2)}%;background:${COMPONENT_COLOURS[name]||'#8a9499'}"
+        title="${esc(name)}: ${gb.toFixed(2)} GB"></div>`).join('');
+  const marker = limit ? `<div class="ceiling"><i style="left:${(limit/span*100).toFixed(2)}%"></i>
+      <em style="left:${(limit/span*100).toFixed(2)}%">limit ${limit} GB</em></div>` : '';
+  return `<div class="meter">
+    ${marker}
+    <div class="meter-bar">${segs}</div>
+    <div class="meter-scale"><span>0</span><span>${span.toFixed(1)} GB</span></div>
+    <div class="meter-legend">${comps.map(([n,g])=>
+      `<span><i class="swatch" style="background:${COMPONENT_COLOURS[n]||'#8a9499'}"></i>${esc(n)} ${g.toFixed(2)} GB</span>`).join('')}</div>
+  </div>`;
+}
+
+function renderPlan(p){
+  const est = p.estimate, v = est.verdict;
+  let html = `<div class="panel">
+    <h2>Estimated memory</h2>
+    <p class="panel-note">Modelled from the architecture and this configuration.
+       Not a measurement — during a run the monitor reports what is actually used.</p>
+    ${meter(est.breakdown, est.available)}
+    ${readings([['Total estimate', est.total],['Capacity', est.available],['Headroom', est.headroom]])}
+    <div class="verdict ${v.status}"><strong>${esc(v.headline)}</strong><p>${esc(v.detail)}</p></div>
+    <p style="font-size:.86rem;color:var(--ink-soft)">Largest cost: ${esc(est.breakdown.largest_component.name)}
+       at ${est.breakdown.largest_component.gb} GB. Ceiling set by ${esc(p.ceiling_source)}.</p>
+    ${noteList(est.breakdown.assumptions)}
+  </div>`;
+
+  const c = p.config;
+  const fields = [
+    ['Method', c.method],['Quantization', c.quantization],['Precision', c.precision],
+    ['LoRA rank', c.lora_rank],['LoRA alpha', c.lora_alpha],
+    ['Target modules', (c.target_modules||[]).join(', ')],
+    ['Batch size', c.batch_size],['Gradient accumulation', c.gradient_accumulation],
+    ['Effective batch', c.effective_batch],['Sequence length', c.sequence_length],
+    ['Learning rate', c.learning_rate],['Epochs', c.epochs],['Optimizer', c.optimizer],
+    ['Gradient checkpointing', c.gradient_checkpointing ? 'on' : 'off'],
+    ['Efficient attention', c.efficient_attention ? 'on' : 'off'],
+    ['CPU offload', c.cpu_offload ? 'on' : 'off'],
+    ['Devices', c.device_count],['Seed', c.seed],
+  ];
+  html += `<div class="panel"><h2>Configuration</h2>
+    <p class="panel-note">Anything you set is marked as yours and was left
+       untouched. Change a value and rebuild to lock it.</p>
+    <dl class="readings">` +
+    fields.map(([k,val])=>{
+      const key = k.toLowerCase().replace(/ /g,'_');
+      const locked = (c.locked||[]).some(l => l === key || l === LOCK_ALIASES[k]);
+      return `<dt>${esc(k)}</dt><dd><span class="reading-value">${esc(val)}</span>` +
+             (locked ? `<span class="mark configured">Yours</span>` : ``) + `</dd>`;
+    }).join('') + `</dl>
+    <p style="margin-top:.9rem;font-size:.86rem;color:var(--ink-soft)">
+      Adapter on disk: about ${p.adapter_size_mb} MB. Working disk needed: about ${p.disk_estimate_gb} GB.</p>
+  </div>`;
+
+  if(p.decisions?.length){
+    html += `<div class="panel"><h2>Why each value is what it is</h2>
+      <p class="panel-note">Read top to bottom, this is the whole reasoning
+         chain. Nothing was changed without appearing here.</p>
+      <ul class="trail">` + p.decisions.map(d=>`<li>
+        <span class="what"><code>${esc(d.field)}</code> = ${esc(String(d.value))}
+          <span class="authority ${esc(d.authority)}">${esc(d.authority)}</span></span>
+        <span class="why">${esc(d.reason)}</span></li>`).join('') + `</ul></div>`;
+  }
+
+  if(p.warnings?.length || p.blockers?.length){
+    html += `<div class="panel"><h2>Before you start</h2>
+      ${noteList(p.blockers,'blockers')}${noteList(p.warnings,'warnings')}</div>`;
+  }
+  return html;
+}
+const LOCK_ALIASES = {'LoRA rank':'lora_rank','LoRA alpha':'lora_alpha','Effective batch':'batch_size'};
+
+async function buildPlan(){
+  const body = $('#plan-body');
+  body.innerHTML = '<p class="loading">Working out a plan…</p>';
+  try{
+    const p = await api('/api/plan', {method:'POST', body:{
+      model: modelRef(),
+      goal: $('#p-goal').value,
+      hardware_profile_id: $('#p-profile').value,
+      budget: budgetPayload(),
+      dataset: datasetPayload(),
+      overrides: Object.keys(LOCKS).length ? LOCKS : null,
+    }});
+    body.innerHTML = renderPlan(p);
+    renderMethods(p.methods);
+  }catch(e){
+    body.innerHTML = `<div class="panel"><h2>Could not build a plan</h2><p class="panel-note">${esc(e.message)}</p></div>`;
+  }
+}
+$('#run-plan').onclick = buildPlan;
+
+/* ---- methods ------------------------------------------------------------- */
+function renderMethods(methods){
+  if(!methods) return;
+  $('#methods-body').innerHTML = `<div class="panel">` + methods.map(m=>`
+    <div class="method ${m.available?'':'off'}">
+      <span class="status-dot ${m.available?'on':'off'}"></span>
+      <span class="name">${esc(m.label)}${m.recommended?' <span class="mark detected">suggested</span>':''}</span>
+      <span class="why">${esc(m.summary)}${m.reason? ' — '+esc(m.reason):''}</span>
+    </div>`).join('') + `</div>`;
+}
+
+/* ---- simulator ----------------------------------------------------------- */
+function simSpec(){
+  return {
+    name: $('#s-name').value || 'Unnamed profile',
+    backend: $('#s-backend').value,
+    device_memory_gb: parseFloat($('#s-vram').value) || null,
+    device_count: parseInt($('#s-count').value,10) || 1,
+    system_ram_gb: parseFloat($('#s-ram').value) || null,
+    cpu_cores: parseInt($('#s-cores').value,10) || null,
+    quantization: $('#s-quant').value === 'yes' ? ['none','int8','nf4'] : ['none'],
+  };
+}
+$('#save-profile').onclick = async () => {
+  const body = $('#sim-body');
+  try{
+    const cap = await api('/api/hardware/profiles', {method:'POST', body:simSpec()});
+    body.innerHTML = renderCapability(cap, null);
+    await loadProfiles();
+    $('#p-profile').value = cap.id;
+    body.insertAdjacentHTML('afterbegin',
+      `<div class="panel"><h2>Saved</h2><p class="panel-note">This profile is now
+       selectable on the planner, where it is labelled Configured throughout.</p></div>`);
+  }catch(e){ body.innerHTML = `<div class="panel"><p class="panel-note">${esc(e.message)}</p></div>`; }
+};
+$('#compare-all').onclick = async () => {
+  const body = $('#sim-body');
+  body.innerHTML = '<p class="loading">Planning against each profile…</p>';
+  try{
+    const r = await api('/api/plan/compare', {method:'POST', body:{
+      model: modelRef(), goal: $('#p-goal').value || 'balanced', budget: budgetPayload(),
+      dataset: datasetPayload(),
+    }});
+    body.innerHTML = `<div class="panel">
+      <h2>${esc(r.model.name)} across every profile</h2>
+      <p class="panel-note">Same model, same data, same goal. Only the machine changes.</p>
+      <table><tr><th>Profile</th><th>Memory</th><th>Plan</th><th>Estimate</th><th>Verdict</th></tr>` +
+      r.results.map(x=>`<tr>
+        <td>${esc(x.profile)} <span class="mark ${x.origin}">${x.origin==='detected'?'Detected':'Configured'}</span></td>
+        <td>${esc(x.memory.display)}</td>
+        <td>${esc(x.config.method)} r${x.config.lora_rank}, seq ${x.config.sequence_length},
+            batch ${x.config.batch_size}×${x.config.gradient_accumulation}</td>
+        <td>${x.estimate_gb} GB</td>
+        <td>${esc(x.verdict.headline)}</td></tr>`).join('') + `</table></div>`;
+  }catch(e){ body.innerHTML = `<div class="panel"><p class="panel-note">${esc(e.message)}</p></div>`; }
+};
+
+/* ---- datasets ------------------------------------------------------------ */
+$('#run-ds').onclick = async () => {
+  const body = $('#ds-body');
+  body.innerHTML = '<p class="loading">Reading the file…</p>';
+  try{
+    const a = await api('/api/datasets/analyse', {method:'POST', body:{
+      path: $('#ds-path').value.trim(), tokenizer: $('#ds-tok').value.trim() || null,
+    }});
+    const t = a.tokens || {};
+    body.innerHTML = `<div class="panel">
+      <h2>${esc(a.format)} · ${a.sample_count.toLocaleString()} rows</h2>
+      <p class="panel-note">${esc(a.task_reason)}</p>
+      ${readings([['Task', {display:a.task, origin:'detected', label:'Detected'}],
+                  ['Mean length', t.mean],['Median length', t.median],
+                  ['95th percentile', t.p95],['Longest', t.max],['Total tokens', t.total]])}
+      <p style="margin-top:.9rem;font-size:.86rem;color:var(--ink-soft)">
+        Content fingerprint ${esc(a.fingerprint)} — this is what an experiment
+        records, so the data stays identifiable after the file moves.</p>
+      ${noteList(a.warnings,'warnings')}
+    </div>
+    <div class="panel"><h2>Columns</h2>
+      <table><tr><th>Column</th><th>Role</th><th>Filled</th><th>Mean length</th><th>Example</th></tr>` +
+      a.columns.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.role||'unmapped')}</td>
+        <td>${c.non_empty.toLocaleString()}</td><td>${c.mean_chars} chars</td>
+        <td style="color:var(--ink-soft)">${esc((c.sample||'').slice(0,70))}</td></tr>`).join('') +
+      `</table></div>
+    <div class="panel"><h2>Use this in a plan</h2>
+      <p class="panel-note">Copies the measured lengths into the planner.</p>
+      <button class="btn" id="ds-to-plan">Carry these figures over</button></div>`;
+    $('#ds-to-plan').onclick = () => {
+      $('#d-count').value = a.sample_count;
+      if(t.p95?.value) $('#d-p95').value = t.p95.value;
+      if(t.max?.value) $('#d-max').value = t.max.value;
+      showPage('planner');
+    };
+  }catch(e){ body.innerHTML = `<div class="panel"><h2>Could not read that file</h2><p class="panel-note">${esc(e.message)}</p></div>`; }
+};
+
+/* ---- environment --------------------------------------------------------- */
+async function loadEnvironment(){
+  const body = $('#env-body');
+  try{
+    const e = await api('/api/environment');
+    body.innerHTML = `<div class="panel">
+      <h2>Snapshot ${esc(e.fingerprint)}</h2>
+      <p class="panel-note">Hashed over the things that change results. Free
+         memory and utilization are excluded on purpose — they move by the
+         second and would make every run look like a new machine.</p>
+      ${readings(Object.entries(e.software.items||{}).map(([k,v])=>[k.replace(/_/g,' '), v]))}
+    </div>`;
+  }catch(err){ body.innerHTML = `<div class="panel"><p class="panel-note">${esc(err.message)}</p></div>`; }
+}
+
+/* ---- startup ------------------------------------------------------------- */
+async function loadGoals(){
+  try{
+    const goals = await api('/api/goals');
+    $('#p-goal').innerHTML = goals.map(g=>
+      `<option value="${g.id}"${g.id==='balanced'?' selected':''}>${esc(g.label)}</option>`).join('');
+  }catch(e){ /* the hardware panel already reports an unreachable backend */ }
+}
+async function loadProfiles(){
+  try{
+    const p = await api('/api/hardware/profiles');
+    $('#p-profile').innerHTML = `<option value="current">Current environment</option>` +
+      p.saved.map(s=>`<option value="${s.id}">${esc(s.profile_name)} (described)</option>`).join('');
+  }catch(e){ /* ignore: planner still works against the current environment */ }
+}
+loadHardware(false); loadGoals(); loadProfiles();
+</script>
+</body>
+</html>
